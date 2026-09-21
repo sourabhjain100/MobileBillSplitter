@@ -39,6 +39,16 @@ h1 { color: var(--tmo-magenta); margin: 0; font-size: 1.4rem; }
   cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 3px;
 }
 .tab-btn svg { display: block; }
+.tab-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.setup-msg {
+  background: #fff; border-left: 4px solid var(--tmo-magenta); border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 8px; font-size: 0.85rem; line-height: 1.4;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.setup-msg strong { display: block; color: var(--tmo-magenta); margin-bottom: 2px; }
+.setup-msg.done { border-left-color: var(--credit-green); }
+.setup-msg.done strong { color: var(--credit-green); }
 .tab-btn.active { background: var(--tmo-magenta); border-color: var(--tmo-magenta); color: #fff; }
 
 .tab-panel { display: none; }
@@ -221,27 +231,29 @@ input { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px; b
 
   <!-- TAB 1: SETTINGS -->
   <div id="tab-settings" class="tab-panel">
+    <div id="setupMsg" class="setup-msg"></div>
+
     <div class="card main-input">
       <div class="row-input">
         <label>Begin Date</label>
-        <input type="text" id="setStart" inputmode="numeric" pattern="[0-9]*" maxlength="2" placeholder="7" oninput="digitsOnly(this)">
+        <input type="text" id="setStart" inputmode="numeric" pattern="[0-9]*" maxlength="2" placeholder="e.g. 7" oninput="digitsOnly(this)">
       </div>
       <div class="row-input">
         <label>End Date</label>
-        <input type="text" id="setEnd" inputmode="numeric" pattern="[0-9]*" maxlength="2" placeholder="6" oninput="digitsOnly(this)">
+        <input type="text" id="setEnd" inputmode="numeric" pattern="[0-9]*" maxlength="2" placeholder="e.g. 6" oninput="digitsOnly(this)">
       </div>
       <div class="row-input">
         <label>Due Date</label>
-        <input type="text" id="setDue" inputmode="numeric" pattern="[0-9]*" maxlength="2" placeholder="24" oninput="digitsOnly(this)">
+        <input type="text" id="setDue" inputmode="numeric" pattern="[0-9]*" maxlength="2" placeholder="e.g. 24" oninput="digitsOnly(this)">
       </div>
       <p class="set-note">Begin, end and due dates are the day of the month, 1 to 31. Begin 7 and end 6 gives cycles like 07 Aug to 06 Sep.</p>
       <div class="row-input">
         <label>Billing Amount $</label>
-        <input type="number" id="setBill" step="0.01">
+        <input type="number" id="setBill" step="0.01" placeholder="0.00">
       </div>
       <div class="row-input">
         <label>Account Credit $</label>
-        <input type="number" id="setAcct" step="0.01">
+        <input type="number" id="setAcct" step="0.01" placeholder="0.00">
       </div>
     </div>
 
@@ -253,7 +265,6 @@ input { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px; b
 
     <div class="set-footer">
       <button class="btn-reset" onclick="discardSettings()">Discard changes</button>
-      <button class="btn-reset" onclick="restoreBuiltIn()">Load original factory values</button>
     </div>
   </div>
 
@@ -370,7 +381,23 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape' && dlgResolve
 
 /* ---------- Tabs ---------- */
 
+// Entry, Bill and Summary stay locked until the defaults have been saved in Settings
+function updateSetupUI() {
+  const ok = hasDefaults();
+  ['entry', 'bill', 'summary'].forEach(t => {
+    const b = document.getElementById('btn-' + t);
+    b.disabled = !ok;
+    b.title = ok ? '' : 'Save your defaults in Settings first';
+  });
+  const m = document.getElementById('setupMsg');
+  m.className = 'setup-msg' + (ok ? ' done' : '');
+  m.innerHTML = ok
+    ? '<strong>Defaults saved</strong>These values are used for every new billing cycle. Update them any time and press Save Defaults.'
+    : "<strong>Set up your group</strong>Enter your group's default values: billing cycle dates (begin, end and due date), the bill amount, and your members with their number of lines, extras and credits. The Entry, Bill and Summary tabs unlock once you save.";
+}
+
 function showTab(name) {
+  if (name !== 'settings' && !hasDefaults()) name = 'settings';
   ['settings', 'entry', 'bill', 'summary'].forEach(t => {
     document.getElementById('tab-' + t).classList.toggle('active', t === name);
     document.getElementById('btn-' + t).classList.toggle('active', t === name);
@@ -379,65 +406,34 @@ function showTab(name) {
   window.scrollTo({ top: 0 });
 }
 
-/* ---------- Defaults (factory + user-saved) ---------- */
+/* ---------- Defaults (set by the user in Settings; nothing is preset) ---------- */
 
-const getFactorySettings = () => ({
-  startDay: 7,
-  endDay: 6,
-  dueDay: 24,
-  bill: 330,
-  accountCredit: 0,
-  families: [
-    {
-      name: "Alex", lines: 2,
-      extras: [{n:"Smartwatch", v:7.25}, {n:"Device Protection", v:9}],
-      credits: []
-    },
-    {
-      name: "Priya", lines: 2,
-      extras: [{n:"Home Internet", v:25}, {n:"Roaming", v:0}],
-      credits: []
-    },
-    {
-      name: "Maya", lines: 2,
-      extras: [{n:"Phone Payment", v:23.54}, {n:"Data Add-on", v:10}],
-      credits: []
-    },
-    {
-      name: "Jordan", lines: 2,
-      extras: [{n:"Tablet Line", v:10}, {n:"Roaming", v:0}],
-      credits: []
-    },
-    {
-      name: "Sam", lines: 2,
-      extras: [{n:"Phone Payment", v:23.54}, {n:"Device Protection", v:9}],
-      credits: []
-    }
-  ]
-});
+const getBlankSettings = () => ({ startDay: '', endDay: '', dueDay: '', bill: '', accountCredit: '', families: [] });
 
-// Returns the user's saved defaults, falling back to factory values
-function getDefaultSettings() {
-  const f = getFactorySettings();
+// Returns the saved defaults if they are complete and valid, otherwise null
+function readSavedDefaults() {
   try {
     const s = JSON.parse(localStorage.getItem(DEFAULTS_KEY));
-    if (s && Array.isArray(s.families)) {
+    const okDay = d => Number.isInteger(d) && d >= 1 && d <= 31;
+    if (s && okDay(s.startDay) && okDay(s.endDay) && okDay(s.dueDay)
+        && !isNaN(parseFloat(s.bill)) && Array.isArray(s.families) && s.families.length > 0) {
       return {
-        startDay: s.startDay >= 1 && s.startDay <= 31 ? s.startDay : f.startDay,
-        endDay: s.endDay >= 1 && s.endDay <= 31 ? s.endDay : f.endDay,
-        dueDay: s.dueDay >= 1 && s.dueDay <= 31 ? s.dueDay : f.dueDay,
-        bill: isNaN(parseFloat(s.bill)) ? f.bill : parseFloat(s.bill),
-        accountCredit: isNaN(parseFloat(s.accountCredit)) ? f.accountCredit : parseFloat(s.accountCredit),
+        startDay: s.startDay, endDay: s.endDay, dueDay: s.dueDay,
+        bill: parseFloat(s.bill), accountCredit: parseFloat(s.accountCredit) || 0,
         families: s.families
       };
     }
   } catch (e) {}
-  return f;
+  return null;
 }
+
+const hasDefaults = () => !!readSavedDefaults();
+
+function getDefaultSettings() { return readSavedDefaults() || getBlankSettings(); }
 
 const getDefaultData = () => {
   const s = getDefaultSettings();
-  return { bill: s.bill, accountCredit: s.accountCredit, families: clone(s.families) };
+  return { bill: parseFloat(s.bill) || 0, accountCredit: parseFloat(s.accountCredit) || 0, families: clone(s.families) };
 };
 
 let data;
@@ -502,6 +498,7 @@ function onCycleChange() {
 function generateCycleOptions() {
   const s = document.getElementById('billingCycle');
   s.innerHTML = '';
+  if (!hasDefaults()) { syncCycleUI(); return; }
   const { startDay, endDay } = getDefaultSettings();
   const now = new Date();
   const m = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -673,14 +670,6 @@ function discardSettings() {
   setStatus('Changes discarded.');
 }
 
-async function restoreBuiltIn() {
-  const ok = await askConfirm("Load the original values into this form? Nothing changes until you press Save Defaults.", 'Load');
-  if (ok) {
-    fillSettingsInputs(getFactorySettings());
-    setStatus('Original values loaded. Press Save Defaults to keep them.');
-  }
-}
-
 async function saveSettings() {
   const s = parseInt(document.getElementById('setStart').value, 10);
   const e = parseInt(document.getElementById('setEnd').value, 10);
@@ -699,6 +688,16 @@ async function saveSettings() {
     await showAlert('Account credit cannot be negative.');
     return;
   }
+  if (!draft.families.length) {
+    await showAlert('Add at least one member.');
+    return;
+  }
+  if (draft.families.some(f => !String(f.name || '').trim())) {
+    await showAlert('Every member needs a name.');
+    return;
+  }
+
+  const firstTime = !hasDefaults();
 
   localStorage.setItem(DEFAULTS_KEY, JSON.stringify({
     startDay: s, endDay: e, dueDay: due, bill: bill, accountCredit: acct, families: clone(draft.families)
@@ -714,8 +713,17 @@ async function saveSettings() {
     showCycleData(sel.value);
   }
   syncCycleUI();
+  updateSetupUI();
 
   setStatus('Defaults saved.');
+
+  if (firstTime) {
+    // First setup: the cycle view already shows saved data or the new defaults, so just unlock and go to Entry
+    updateStatus();
+    await showAlert('Defaults saved. The Entry, Bill and Summary tabs are now unlocked.');
+    showTab('entry');
+    return;
+  }
 
   const apply = await askConfirm("Defaults saved. Load them into the Entry tab now?\n\nLoad now: replaces the members and bill amount shown on Entry.\nNot now: keeps what is shown; defaults apply when you press Reset.", 'Load now', 'Not now');
   if (apply) {
@@ -858,7 +866,7 @@ function renderYearly() {
     totAcct += r.acct; totBill += r.bill;
   });
 
-  let h = title + `<div class="ys-sub">${items.length} Billing Cycle${items.length !== 1 ? 's' : ''} &middot; Amounts in $</div>`;
+  let h = title + `<div class="ys-sub">${items.length} Billing cycle${items.length !== 1 ? 's' : ''} &middot; Amounts in $</div>`;
   h += `<div class="ys-scroll"><table class="ys-table"><thead><tr><th class="l">Cycle</th><th>Bill</th>`
     + keys.map(k => `<th>${esc(names[k])}</th>`).join('')
     + (hasAcct ? '<th>Acct Cr.</th>' : '') + `</tr></thead><tbody>`;
@@ -945,10 +953,16 @@ function printYearFallback() {
 
 generateCycleOptions();
 fillSettingsInputs(getDefaultSettings());
-// If the latest cycle was saved before, load it and prepare its bill; otherwise show the working copy
-const initCyc = document.getElementById('billingCycle').value;
-if (loadCycle(initCyc)) buildBill(initCyc); else render();
-updateStatus();
+updateSetupUI();
+if (hasDefaults()) {
+  // If the latest cycle was saved before, load it and prepare its bill; otherwise show the working copy
+  const initCyc = document.getElementById('billingCycle').value;
+  if (loadCycle(initCyc)) buildBill(initCyc); else render();
+  updateStatus();
+  showTab('entry');
+} else {
+  showTab('settings');
+}
 </script>
 
 </body>
