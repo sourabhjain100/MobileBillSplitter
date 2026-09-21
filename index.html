@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>T-Mobile Bill Splitter</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<style>
+:root {
+  --tmo-magenta: #e20074;
+  --bg-color: #f0f2f5;
+  --card-bg: #ffffff;
+  --credit-green: #2e7d32;
+  --error-red: #d32f2f;
+  --wa-green: #25D366;
+}
+
+body {
+  font-family: -apple-system, system-ui, sans-serif;
+  background-color: var(--bg-color);
+  margin: 0; padding: 8px; color: #333;
+}
+
+.container { max-width: 480px; margin: 0 auto; }
+
+.header { text-align: center; margin-bottom: 8px; }
+h1 { color: var(--tmo-magenta); margin: 0; font-size: 1.4rem; }
+
+/* Tabs */
+.tabs {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  position: sticky; top: 0; z-index: 10;
+  background: var(--bg-color); padding: 6px 0 8px; margin-bottom: 4px;
+}
+.tab-btn {
+  background: #fff; border: 1px solid #ddd; border-radius: 8px;
+  padding: 7px 2px; font-size: 0.72rem; font-weight: bold; color: #777;
+  cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 3px;
+}
+.tab-btn svg { display: block; }
+.tab-btn.active { background: var(--tmo-magenta); border-color: var(--tmo-magenta); color: #fff; }
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+.card {
+  background: var(--card-bg); padding: 10px 12px; border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 8px;
+}
+
+.main-input { display: flex; flex-direction: column; gap: 8px; }
+.row-input { display: flex; align-items: center; gap: 8px; }
+.row-input label { width: 112px; flex: none; }
+.row-input label.auto { width: auto; }
+.row-input input, .row-input select { flex: 1; font-weight: bold; border: 1px solid #ddd; border-radius: 5px; padding: 8px; font-size: 0.9rem; }
+.row-input input.short { flex: none; width: 56px; text-align: center; }
+
+.save-status { font-size: 0.75rem; color: #777; text-align: right; }
+.save-status.saved { color: var(--credit-green); }
+
+.family-card { border-top: 3px solid var(--tmo-magenta); }
+.fam-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.name-wrap { position: relative; flex: 1; }
+.fam-name { width: 100%; box-sizing: border-box; border: 1px solid #ccc; border-radius: 6px; background: #fafafa; font-weight: bold; font-size: 1rem; padding: 8px 30px 8px 8px; outline: none; }
+.fam-name:focus { border-color: var(--tmo-magenta); background: #fff; }
+.name-edit { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); color: #aaa; font-size: 0.95rem; pointer-events: none; }
+.fam-name:focus + .name-edit { color: var(--tmo-magenta); }
+
+.line-counter { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.line-btn {
+  background: #eee; border: 1px solid #ddd; border-radius: 4px;
+  width: 28px; height: 28px; font-size: 1rem; font-weight: bold;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.line-count-display { font-size: 1rem; font-weight: bold; color: var(--tmo-magenta); min-width: 60px; }
+
+label { display: block; font-size: 0.75rem; color: #777; text-transform: uppercase; font-weight: bold; }
+input { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box; font-size: 0.9rem; }
+
+.list-item { display: flex; gap: 5px; margin-bottom: 5px; align-items: center; }
+.list-item input[type="text"] { flex: 2; }
+.list-item input[type="number"] { flex: 1; }
+
+.btn-del { background: none; border: none; color: #ccc; cursor: pointer; font-size: 1.1rem; padding: 0 5px; }
+.add-btn { background: none; border: none; color: var(--tmo-magenta); font-size: 0.75rem; font-weight: bold; cursor: pointer; padding: 5px 0; }
+.add-btn.credit { color: var(--credit-green); }
+.add-btn.block { width: 100%; text-align: center; background: #fff; border-radius: 8px; padding: 10px; margin-bottom: 8px; }
+
+.btn-main {
+  background: var(--tmo-magenta); color: white; border: none;
+  width: 100%; padding: 12px; border-radius: 8px; font-weight: bold;
+  font-size: 1rem; margin: 8px 0; cursor: pointer;
+}
+
+.share-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 12px; }
+.btn-share {
+  padding: 10px; font-size: 0.8rem; border: 1px solid #ddd; border-radius: 6px;
+  background: #fff; cursor: pointer; font-weight: bold;
+}
+
+.result-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 0.85rem; }
+.res-credit { color: var(--credit-green); font-style: italic; }
+.res-extra { color: #666; }
+.res-indent { padding-left: 10px; font-size: 0.8rem; border-left: 1px solid #eee; margin-left: 5px; }
+.summary-header-box { text-align: center; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 2px solid #f0f0f0; }
+.summary-bill-total { font-size: 1.2rem; font-weight: 800; color: #333; margin-top: 4px; }
+
+#captureArea { padding: 12px; background: white; border-radius: 10px; }
+
+.bill-empty { text-align: center; color: #777; font-size: 0.9rem; padding: 24px 10px; }
+.bill-empty button { margin-top: 12px; }
+
+.reset-container { text-align: center; margin-top: 18px; padding-bottom: 12px; }
+.btn-reset { background: none; border: 1px solid #ccc; color: #999; padding: 5px 15px; border-radius: 4px; font-size: 0.7rem; cursor: pointer; }
+
+/* Settings tab */
+.set-note { font-size: 0.72rem; color: #777; margin: 0; }
+.set-status { text-align: center; font-size: 0.8rem; color: var(--credit-green); min-height: 1.1em; margin: 0 0 4px; }
+.set-footer { display: flex; justify-content: center; gap: 10px; margin: 14px 0; }
+
+/* Yearly summary */
+.year-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.year-title { font-weight: 800; color: var(--tmo-magenta); font-size: 0.95rem; }
+.year-step { display: flex; align-items: center; gap: 10px; }
+.year-step span { font-weight: bold; min-width: 40px; text-align: center; }
+.year-area { background: #fff; padding: 12px; border-radius: 10px; }
+.ys-title { font-weight: 800; font-size: 1rem; text-align: center; }
+.ys-sub { text-align: center; font-size: 0.72rem; color: #777; margin: 2px 0 8px; }
+.ys-scroll { overflow-x: auto; }
+.ys-table { width: 100%; border-collapse: collapse; font-size: 0.72rem; }
+.ys-table th, .ys-table td { padding: 5px 6px; text-align: right; white-space: nowrap; border-bottom: 1px solid #eee; }
+.ys-table th { color: var(--tmo-magenta); border-bottom: 2px solid var(--tmo-magenta); font-size: 0.7rem; }
+.ys-table .l { text-align: left; }
+.ys-table tfoot td { font-weight: 800; border-top: 2px solid #333; border-bottom: none; }
+.ys-empty { text-align: center; color: #777; font-size: 0.85rem; padding: 16px 0; }
+.share-actions.two { grid-template-columns: 1fr 1fr; }
+
+/* Custom dropdown (billing cycle) */
+.dd { position: relative; flex: 1; min-width: 0; }
+.dd-btn {
+  width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  padding: 8px; border: 1px solid #ddd; border-radius: 5px; background: #fff;
+  font-size: 0.9rem; font-weight: bold; color: #333; text-align: left; cursor: pointer;
+}
+.dd-caret { color: var(--tmo-magenta); font-size: 0.8rem; }
+.dd-menu {
+  display: none; position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20;
+  background: #fff; border: 1px solid #ddd; border-radius: 8px;
+  max-height: 280px; overflow-y: auto;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+}
+.dd-menu.open { display: block; }
+.dd-item {
+  width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  padding: 11px 10px; border: none; border-bottom: 1px solid #f0f0f0; background: #fff;
+  font-size: 0.9rem; color: #333; text-align: left; cursor: pointer;
+}
+.dd-item:last-child { border-bottom: none; }
+.dd-item.sel { background: #fdf0f7; color: var(--tmo-magenta); font-weight: bold; }
+.dd-tag { font-size: 0.7rem; font-weight: bold; color: var(--credit-green); }
+
+/* Confirmation / alert dialog */
+.dlg-overlay {
+  display: none; position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,0.5); padding: 16px; box-sizing: border-box;
+  align-items: center; justify-content: center;
+}
+.dlg-overlay.open { display: flex; }
+.dlg-box {
+  background: #fff; border-radius: 12px; padding: 18px;
+  width: 100%; max-width: 340px; box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+}
+.dlg-msg { font-size: 0.95rem; line-height: 1.4; white-space: pre-line; margin-bottom: 16px; color: #333; }
+.dlg-actions { display: flex; gap: 8px; }
+.dlg-btn {
+  flex: 1; padding: 11px; border-radius: 8px; font-weight: bold; font-size: 0.95rem;
+  cursor: pointer; border: 1px solid #ddd; background: #fff; color: #555;
+}
+.dlg-btn.primary { background: var(--tmo-magenta); border-color: var(--tmo-magenta); color: #fff; }
+
+@media print {
+  body { background: white; padding: 0; }
+  .container { max-width: 100%; }
+  .header, .tabs, .share-actions, .bill-empty, .dlg-overlay { display: none !important; }
+  .tab-panel { display: none !important; }
+  #tab-bill { display: block !important; }
+  #billContent { box-shadow: none; border: none; padding: 0; }
+  body.print-year #tab-bill { display: none !important; }
+  body.print-year #tab-summary { display: block !important; }
+  body.print-year #yearCard { box-shadow: none; border: none; padding: 0; }
+  body.print-year .year-head { display: none !important; }
+  #captureArea { padding: 0; border-radius: 0; }
+  .summary-header-box { border-bottom: 2px solid #000; }
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header"><h1>T-Mobile Bill Splitter</h1></div>
+
+  <div class="tabs">
+    <button class="tab-btn" id="btn-settings" onclick="showTab('settings')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+      <span>Settings</span>
+    </button>
+    <button class="tab-btn active" id="btn-entry" onclick="showTab('entry')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      <span>Entry</span>
+    </button>
+    <button class="tab-btn" id="btn-bill" onclick="showTab('bill')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      <span>Bill</span>
+    </button>
+    <button class="tab-btn" id="btn-summary" onclick="showTab('summary')">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      <span>Summary</span>
+    </button>
+  </div>
+
+  <!-- TAB 1: SETTINGS -->
+  <div id="tab-settings" class="tab-panel">
+    <div class="card main-input">
+      <div class="row-input">
+        <label>Begin Date</label>
+        <input type="text" id="setStart" inputmode="numeric" pattern="[0-9]*" maxlength="2" placeholder="7" oninput="digitsOnly(this)">
+      </div>
+      <div class="row-input">
+        <label>End Date</label>
+        <input type="text" id="setEnd" inputmode="numeric" pattern="[0-9]*" maxlength="2" placeholder="6" oninput="digitsOnly(this)">
+      </div>
+      <div class="row-input">
+        <label>Due Date</label>
+        <input type="text" id="setDue" inputmode="numeric" pattern="[0-9]*" maxlength="2" placeholder="24" oninput="digitsOnly(this)">
+      </div>
+      <p class="set-note">Begin, end and due dates are the day of the month, 1 to 31. Begin 7 and end 6 gives cycles like 07 Aug to 06 Sep.</p>
+      <div class="row-input">
+        <label>Billing Amount $</label>
+        <input type="number" id="setBill" step="0.01">
+      </div>
+      <div class="row-input">
+        <label>Account Credit $</label>
+        <input type="number" id="setAcct" step="0.01">
+      </div>
+    </div>
+
+    <div id="setFamList"></div>
+    <button class="add-btn block" onclick="addFam('set')">+ Add Member</button>
+
+    <button class="btn-main" onclick="saveSettings()">Save Defaults</button>
+    <p class="set-status" id="setStatus"></p>
+
+    <div class="set-footer">
+      <button class="btn-reset" onclick="discardSettings()">Discard changes</button>
+      <button class="btn-reset" onclick="restoreBuiltIn()">Load original factory values</button>
+    </div>
+  </div>
+
+  <!-- TAB 2: ENTRY -->
+  <div id="tab-entry" class="tab-panel active">
+    <div class="card main-input">
+      <div class="row-input">
+        <label>Billing Cycle</label>
+        <div class="dd" id="cycleDd">
+          <button type="button" class="dd-btn" onclick="toggleCycleMenu()" aria-haspopup="listbox">
+            <span id="cycleLabel"></span><span class="dd-caret">&#9662;</span>
+          </button>
+          <div class="dd-menu" id="cycleMenu" role="listbox"></div>
+        </div>
+        <select id="billingCycle" style="display:none;"></select>
+      </div>
+      <div class="row-input"><label>Bill Total $</label><input type="number" id="totalBill" step="0.01" oninput="onBillInput(this.value)"></div>
+      <div class="row-input"><label>Account Credit $</label><input type="number" id="acctCredit" step="0.01" oninput="onAcctInput(this.value)"></div>
+      <div id="saveStatus" class="save-status"></div>
+    </div>
+
+    <div id="famList"></div>
+    <button class="add-btn block" onclick="addFam('main')">+ Add Member</button>
+    <button class="btn-main" onclick="calculate()">Calculate &amp; Save</button>
+
+    <div class="reset-container">
+      <button class="btn-reset" onclick="resetApp()">Reset to Default Settings</button>
+    </div>
+  </div>
+
+  <!-- TAB 3: BILL -->
+  <div id="tab-bill" class="tab-panel">
+    <div id="billEmpty" class="bill-empty card">
+      No bill calculated for this cycle yet.<br>
+      <button class="btn-main" onclick="showTab('entry')">Go to Entry</button>
+    </div>
+    <div id="billContent" class="card" style="display:none;">
+      <div id="captureArea"></div>
+      <div class="share-actions">
+        <button class="btn-share" onclick="shareWhatsApp()" style="border-color: var(--wa-green); color: var(--wa-green);">WhatsApp</button>
+        <button class="btn-share" onclick="downloadImage()">Save Image</button>
+        <button class="btn-share" onclick="window.print()">Save PDF</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB 4: SUMMARY -->
+  <div id="tab-summary" class="tab-panel">
+    <div id="yearCard" class="card">
+      <div class="year-head">
+        <div class="year-title">Yearly Summary</div>
+        <div class="year-step">
+          <button class="line-btn" onclick="stepYear(-1)" aria-label="Previous year">&#8249;</button>
+          <span id="yearLabel"></span>
+          <button class="line-btn" onclick="stepYear(1)" aria-label="Next year">&#8250;</button>
+        </div>
+      </div>
+      <div id="yearArea" class="year-area"></div>
+      <div class="share-actions two">
+        <button class="btn-share" onclick="saveYearImage()">Save Image</button>
+        <button class="btn-share" onclick="saveYearPDF()">Save PDF</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Confirmation / alert dialog -->
+<div id="dlgOverlay" class="dlg-overlay" onclick="if(event.target===this) closeDialog(false)">
+  <div class="dlg-box" role="dialog" aria-modal="true">
+    <div id="dlgMsg" class="dlg-msg"></div>
+    <div class="dlg-actions">
+      <button id="dlgCancel" class="dlg-btn" onclick="closeDialog(false)">Cancel</button>
+      <button id="dlgOk" class="dlg-btn primary" onclick="closeDialog(true)">OK</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const VERSION = 'tmo_v22';
+const CYCLES_KEY = VERSION + '_cycles';
+const DEFAULTS_KEY = VERSION + '_defaults';
+
+const clone = o => JSON.parse(JSON.stringify(o));
+const ordinal = n => { const v = n % 100; const t = ['th','st','nd','rd']; return n + (t[(v - 20) % 10] || t[v] || 'th'); };
+const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+/* ---------- Modal dialogs (replace confirm/alert) ---------- */
+
+let dlgResolve = null;
+
+function openDialog(message, okText, cancelText, showCancel) {
+  return new Promise(resolve => {
+    if (dlgResolve) dlgResolve(false);   // close any dialog already open
+    dlgResolve = resolve;
+    document.getElementById('dlgMsg').innerText = message;
+    document.getElementById('dlgOk').innerText = okText;
+    const c = document.getElementById('dlgCancel');
+    c.innerText = cancelText;
+    c.style.display = showCancel ? '' : 'none';
+    document.getElementById('dlgOverlay').classList.add('open');
+    document.getElementById('dlgOk').focus();
+  });
+}
+
+function closeDialog(result) {
+  document.getElementById('dlgOverlay').classList.remove('open');
+  if (dlgResolve) { const r = dlgResolve; dlgResolve = null; r(result); }
+}
+
+const askConfirm = (message, okText = 'OK', cancelText = 'Cancel') => openDialog(message, okText, cancelText, true);
+const showAlert = message => openDialog(message, 'OK', '', false);
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && dlgResolve) closeDialog(false); });
+
+/* ---------- Tabs ---------- */
+
+function showTab(name) {
+  ['settings', 'entry', 'bill', 'summary'].forEach(t => {
+    document.getElementById('tab-' + t).classList.toggle('active', t === name);
+    document.getElementById('btn-' + t).classList.toggle('active', t === name);
+  });
+  if (name === 'summary') renderYearly();
+  window.scrollTo({ top: 0 });
+}
+
+/* ---------- Defaults (factory + user-saved) ---------- */
+
+const getFactorySettings = () => ({
+  startDay: 7,
+  endDay: 6,
+  dueDay: 24,
+  bill: 330,
+  accountCredit: 0,
+  families: [
+    {
+      name: "Alex", lines: 2,
+      extras: [{n:"Smartwatch", v:7.25}, {n:"Device Protection", v:9}],
+      credits: []
+    },
+    {
+      name: "Priya", lines: 2,
+      extras: [{n:"Home Internet", v:25}, {n:"Roaming", v:0}],
+      credits: []
+    },
+    {
+      name: "Maya", lines: 2,
+      extras: [{n:"Phone Payment", v:23.54}, {n:"Data Add-on", v:10}],
+      credits: []
+    },
+    {
+      name: "Jordan", lines: 2,
+      extras: [{n:"Tablet Line", v:10}, {n:"Roaming", v:0}],
+      credits: []
+    },
+    {
+      name: "Sam", lines: 2,
+      extras: [{n:"Phone Payment", v:23.54}, {n:"Device Protection", v:9}],
+      credits: []
+    }
+  ]
+});
+
+// Returns the user's saved defaults, falling back to factory values
+function getDefaultSettings() {
+  const f = getFactorySettings();
+  try {
+    const s = JSON.parse(localStorage.getItem(DEFAULTS_KEY));
+    if (s && Array.isArray(s.families)) {
+      return {
+        startDay: s.startDay >= 1 && s.startDay <= 31 ? s.startDay : f.startDay,
+        endDay: s.endDay >= 1 && s.endDay <= 31 ? s.endDay : f.endDay,
+        dueDay: s.dueDay >= 1 && s.dueDay <= 31 ? s.dueDay : f.dueDay,
+        bill: isNaN(parseFloat(s.bill)) ? f.bill : parseFloat(s.bill),
+        accountCredit: isNaN(parseFloat(s.accountCredit)) ? f.accountCredit : parseFloat(s.accountCredit),
+        families: s.families
+      };
+    }
+  } catch (e) {}
+  return f;
+}
+
+const getDefaultData = () => {
+  const s = getDefaultSettings();
+  return { bill: s.bill, accountCredit: s.accountCredit, families: clone(s.families) };
+};
+
+let data;
+try { data = JSON.parse(localStorage.getItem(VERSION)) || getDefaultData(); }
+catch (e) { data = getDefaultData(); }
+
+/* ---------- Per-billing-cycle storage ---------- */
+
+function getCycles() {
+  try { return JSON.parse(localStorage.getItem(CYCLES_KEY)) || {}; }
+  catch (e) { return {}; }
+}
+
+function saveCycle(cyc) {
+  const all = getCycles();
+  // Overwrites only this cycle's entry; other cycles are untouched
+  all[cyc] = { savedAt: new Date().toISOString(), data: clone(data) };
+  localStorage.setItem(CYCLES_KEY, JSON.stringify(all));
+}
+
+function loadCycle(cyc) {
+  const entry = getCycles()[cyc];
+  if (!entry) return false;
+  data = clone(entry.data);
+  render();
+  save();
+  return true;
+}
+
+function updateStatus() {
+  const cyc = document.getElementById('billingCycle').value;
+  const entry = getCycles()[cyc];
+  const el = document.getElementById('saveStatus');
+  if (entry) {
+    el.innerText = `Saved on ${new Date(entry.savedAt).toLocaleString()}`;
+    el.classList.add('saved');
+  } else {
+    el.innerText = 'Not saved yet for this cycle';
+    el.classList.remove('saved');
+  }
+}
+
+// Shows the saved data for a cycle if it exists, otherwise the default data
+function showCycleData(cyc) {
+  if (loadCycle(cyc)) {
+    buildBill(cyc);
+  } else {
+    data = getDefaultData();
+    render();
+    save();
+    clearBill();
+  }
+}
+
+function onCycleChange() {
+  showCycleData(document.getElementById('billingCycle').value);
+  updateStatus();
+}
+
+/* ---------- Cycle dropdown (uses saved begin/end dates) ---------- */
+
+function generateCycleOptions() {
+  const s = document.getElementById('billingCycle');
+  s.innerHTML = '';
+  const { startDay, endDay } = getDefaultSettings();
+  const now = new Date();
+  const m = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const pad = n => String(n).padStart(2, '0');
+  // Builds a date, clamping the day to the month's length (e.g. 31 in a 30-day month)
+  const mk = (y, mo, d) => {
+    const last = new Date(y, mo + 1, 0).getDate();
+    return new Date(y, mo, Math.min(d, last));
+  };
+  // List the cycles ending in the past 24 months, including the current month, newest first
+  const off = now.getDate() > endDay ? 0 : -1;
+  // If begin date is after end date, the cycle starts in the previous month
+  const startShift = startDay > endDay ? 1 : 0;
+  const curM = now.getMonth();
+  // Default selection: the most recently completed cycle
+  const defIdx = curM + off;
+  let defLabel = '';
+  for (let eIdx = curM; eIdx > curM - 24; eIdx--) {
+    const ed = mk(now.getFullYear(), eIdx, endDay);
+    const sd = mk(now.getFullYear(), eIdx - startShift, startDay);
+    const lbl = `${pad(sd.getDate())} ${m[sd.getMonth()]} to ${pad(ed.getDate())} ${m[ed.getMonth()]} ${ed.getFullYear()}`;
+    const o = document.createElement('option'); o.value = lbl; o.innerText = lbl; s.appendChild(o);
+    if (eIdx === defIdx) defLabel = lbl;
+  }
+  if (defLabel) s.value = defLabel;
+  syncCycleUI();
+}
+
+/* ---------- Custom billing cycle dropdown (opens on the page, not the browser picker) ---------- */
+
+function syncCycleUI() {
+  document.getElementById('cycleLabel').innerText = document.getElementById('billingCycle').value || 'Select cycle';
+}
+
+function buildCycleMenu() {
+  const sel = document.getElementById('billingCycle');
+  const saved = getCycles();
+  const menu = document.getElementById('cycleMenu');
+  menu.innerHTML = '';
+  [...sel.options].forEach(o => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'dd-item' + (o.value === sel.value ? ' sel' : '');
+    const t = document.createElement('span'); t.innerText = o.value; b.appendChild(t);
+    if (saved[o.value]) {
+      const tag = document.createElement('span'); tag.className = 'dd-tag'; tag.innerText = 'Saved'; b.appendChild(tag);
+    }
+    b.onclick = () => pickCycle(o.value);
+    menu.appendChild(b);
+  });
+}
+
+function toggleCycleMenu() {
+  const menu = document.getElementById('cycleMenu');
+  if (menu.classList.contains('open')) { closeCycleMenu(); return; }
+  buildCycleMenu();
+  menu.classList.add('open');
+  const sel = menu.querySelector('.sel');
+  if (sel) sel.scrollIntoView({ block: 'nearest' });
+}
+
+function closeCycleMenu() { document.getElementById('cycleMenu').classList.remove('open'); }
+
+function pickCycle(v) {
+  document.getElementById('billingCycle').value = v;
+  syncCycleUI();
+  closeCycleMenu();
+  onCycleChange();
+}
+
+document.addEventListener('click', e => { if (!e.target.closest('#cycleDd')) closeCycleMenu(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeCycleMenu(); });
+
+/* ---------- Rendering (shared by Entry tab and Settings tab) ---------- */
+
+// ctx 'main' edits the live data; ctx 'set' edits the settings draft
+let draft = { families: [] };
+const target = ctx => ctx === 'set' ? draft : data;
+const rerender = ctx => ctx === 'set' ? renderSettings() : render();
+const autosave = ctx => { if (ctx === 'main') save(); };
+
+const itemRow = (ctx, fi, ii, itm, typ) => `<div class="list-item"><input type="text" placeholder="Item" value="${esc(itm.n)}" onchange="updItem('${ctx}',${fi},${ii},'${typ}','n',this.value)"><input type="number" value="${itm.v}" onchange="updItem('${ctx}',${fi},${ii},'${typ}','v',this.value)"><button class="btn-del" onclick="remItem('${ctx}',${fi},${ii},'${typ}')">✕</button></div>`;
+
+const famHTML = (ctx, f, fi) => `
+  <div class="fam-head">
+    <div class="name-wrap">
+      <input class="fam-name" placeholder="Member name" title="Tap to edit name" value="${esc(f.name)}" onchange="upd('${ctx}',${fi},'name',this.value)">
+      <span class="name-edit" aria-hidden="true">&#9998;&#xFE0E;</span>
+    </div>
+    <button class="btn-del" onclick="remFam('${ctx}',${fi})">✕</button>
+  </div>
+  <label>Lines</label>
+  <div class="line-counter">
+    <button class="line-btn" onclick="stepLine('${ctx}',${fi},-1)">−</button>
+    <span class="line-count-display">${f.lines} Line${f.lines!==1?'s':''}</span>
+    <button class="line-btn" onclick="stepLine('${ctx}',${fi},1)">+</button>
+  </div>
+  <label>Extras</label>
+  <div>${f.extras.map((x, xi) => itemRow(ctx, fi, xi, x, 'extras')).join('')}</div>
+  <button class="add-btn" onclick="addItem('${ctx}',${fi},'extras')">+ Add Extra</button>
+  <label style="margin-top:8px;">Credits</label>
+  <div>${f.credits.map((cr, ci) => itemRow(ctx, fi, ci, cr, 'credits')).join('')}</div>
+  <button class="add-btn credit" onclick="addItem('${ctx}',${fi},'credits')">+ Add Credit</button>`;
+
+function renderList(ctx, containerId) {
+  const c = document.getElementById(containerId); c.innerHTML = '';
+  target(ctx).families.forEach((f, fi) => {
+    const d = document.createElement('div'); d.className = 'card family-card';
+    d.innerHTML = famHTML(ctx, f, fi);
+    c.appendChild(d);
+  });
+}
+
+function render() {
+  renderList('main', 'famList');
+  document.getElementById('totalBill').value = data.bill;
+  document.getElementById('acctCredit').value = data.accountCredit || 0;
+}
+
+function renderSettings() { renderList('set', 'setFamList'); }
+
+function stepLine(ctx, fi, s) { const t = target(ctx); t.families[fi].lines = Math.max(0, t.families[fi].lines + s); rerender(ctx); autosave(ctx); }
+function upd(ctx, fi, k, v) { target(ctx).families[fi][k] = v; autosave(ctx); }
+function updItem(ctx, fi, ii, t, k, v) { target(ctx).families[fi][t][ii][k] = (k==='v') ? parseFloat(v || 0) : v; autosave(ctx); }
+function addFam(ctx) { target(ctx).families.push({name:"New", lines:1, extras:[], credits:[]}); rerender(ctx); autosave(ctx); }
+function remFam(ctx, i) {
+  askConfirm('Remove this member?', 'Remove').then(ok => {
+    if (ok) { target(ctx).families.splice(i,1); rerender(ctx); autosave(ctx); }
+  });
+}
+function addItem(ctx, fi, t) { target(ctx).families[fi][t].push({n:"", v:0}); rerender(ctx); }
+function remItem(ctx, fi, ii, t) { target(ctx).families[fi][t].splice(ii,1); rerender(ctx); autosave(ctx); }
+
+// Working-copy autosave (not tied to any billing cycle)
+function save() { localStorage.setItem(VERSION, JSON.stringify(data)); }
+
+// Keep the entered bill total in the data so re-rendering never resets it
+function onBillInput(v) { data.bill = parseFloat(v) || 0; save(); }
+function onAcctInput(v) { data.accountCredit = parseFloat(v) || 0; save(); }
+
+async function resetApp() {
+  const ok = await askConfirm("This will load your saved default members and bill amount into the current view. Saved billing cycles are not deleted until you Calculate & Save again.", 'Reset');
+  if (ok) {
+    data = getDefaultData();
+    render();
+    save();
+    clearBill();
+  }
+}
+
+/* ---------- Settings tab ---------- */
+
+function digitsOnly(el) { el.value = el.value.replace(/\D/g, ''); }
+
+function fillSettingsInputs(s) {
+  document.getElementById('setStart').value = s.startDay;
+  document.getElementById('setEnd').value = s.endDay;
+  document.getElementById('setDue').value = s.dueDay;
+  document.getElementById('setBill').value = s.bill;
+  document.getElementById('setAcct').value = s.accountCredit;
+  draft = { families: clone(s.families) };
+  renderSettings();
+}
+
+function setStatus(msg) { document.getElementById('setStatus').innerText = msg; }
+
+function discardSettings() {
+  fillSettingsInputs(getDefaultSettings());
+  setStatus('Changes discarded.');
+}
+
+async function restoreBuiltIn() {
+  const ok = await askConfirm("Load the original values into this form? Nothing changes until you press Save Defaults.", 'Load');
+  if (ok) {
+    fillSettingsInputs(getFactorySettings());
+    setStatus('Original values loaded. Press Save Defaults to keep them.');
+  }
+}
+
+async function saveSettings() {
+  const s = parseInt(document.getElementById('setStart').value, 10);
+  const e = parseInt(document.getElementById('setEnd').value, 10);
+  const due = parseInt(document.getElementById('setDue').value, 10);
+  const bill = parseFloat(document.getElementById('setBill').value);
+  const acct = parseFloat(document.getElementById('setAcct').value) || 0;
+  if (!(s >= 1 && s <= 31) || !(e >= 1 && e <= 31) || !(due >= 1 && due <= 31)) {
+    await showAlert('Enter the begin, end and due dates as numbers from 1 to 31.');
+    return;
+  }
+  if (isNaN(bill) || bill < 0) {
+    await showAlert('Enter a valid billing amount.');
+    return;
+  }
+  if (acct < 0) {
+    await showAlert('Account credit cannot be negative.');
+    return;
+  }
+
+  localStorage.setItem(DEFAULTS_KEY, JSON.stringify({
+    startDay: s, endDay: e, dueDay: due, bill: bill, accountCredit: acct, families: clone(draft.families)
+  }));
+
+  // Rebuild the cycle list using the new dates, keeping the current selection if it still exists
+  const sel = document.getElementById('billingCycle');
+  const prev = sel.value;
+  generateCycleOptions();
+  if ([...sel.options].some(o => o.value === prev)) {
+    sel.value = prev;
+  } else {
+    showCycleData(sel.value);
+  }
+  syncCycleUI();
+
+  setStatus('Defaults saved.');
+
+  const apply = await askConfirm("Defaults saved. Load them into the Entry tab now?\n\nLoad now: replaces the members and bill amount shown on Entry.\nNot now: keeps what is shown; defaults apply when you press Reset.", 'Load now', 'Not now');
+  if (apply) {
+    data = getDefaultData();
+    render();
+    save();
+    clearBill();
+  }
+  updateStatus();
+}
+
+/* ---------- Bill tab ---------- */
+
+function clearBill() {
+  document.getElementById('billContent').style.display = 'none';
+  document.getElementById('billEmpty').style.display = 'block';
+}
+
+// Account credit reduces the bill before it is split across lines
+function computeSplit(d = data) {
+  let nEx = 0, tL = 0;
+  d.families.forEach(f => {
+    tL += f.lines;
+    f.extras.forEach(x => nEx += (parseFloat(x.v)||0));
+    f.credits.forEach(c => nEx -= (parseFloat(c.v)||0));
+  });
+  const acct = parseFloat(d.accountCredit) || 0;
+  const base = tL > 0 ? ((parseFloat(d.bill) || 0) - acct - nEx) / tL : 0;
+  return { base, acct };
+}
+
+function buildBill(cyc) {
+  const { base, acct } = computeSplit();
+
+  let h = `<div class="summary-header-box"><div style="font-size:0.8rem; color:#666;">Cycle: ${cyc}</div><div class="summary-bill-total">Total Bill: $${data.bill.toFixed(2)}</div>${acct > 0 ? `<div style="font-size:0.8rem; color:var(--credit-green); font-style:italic; margin-top:2px;">Account Credit: -$${acct.toFixed(2)}</div>` : ''}</div><h3 style="margin: 8px 0; border-bottom: 1px solid #eee;">Breakdown</h3>`;
+
+  data.families.forEach(f => {
+    const lC = base * f.lines;
+    const total = lC + f.extras.reduce((s,x)=>s+(parseFloat(x.v)||0),0) - f.credits.reduce((s,c)=>s+(parseFloat(c.v)||0),0);
+
+    h += `<div style="margin-bottom:10px; border-bottom:1px solid #eee; padding-bottom:7px;"><div class="result-row"><strong style="font-size:1rem;">${esc(f.name)}</strong> <strong style="color:var(--tmo-magenta); font-size:1rem;">$${total.toFixed(2)}</strong></div><div class="result-row" style="color:#777; font-size:0.8rem;"><span>${f.lines} Lines ($${base.toFixed(2)} × ${f.lines})</span><span>$${lC.toFixed(2)}</span></div>${f.extras.filter(x=>x.v > 0).map(x=>`<div class="result-row res-indent res-extra"><span>+ ${esc(x.n) || 'Extra'}</span><span>$${parseFloat(x.v).toFixed(2)}</span></div>`).join('')}${f.credits.filter(c=>c.v > 0).map(c=>`<div class="result-row res-indent res-credit"><span>- ${esc(c.n) || 'Credit'}</span><span>$${parseFloat(c.v).toFixed(2)}</span></div>`).join('')}</div>`;
+  });
+
+  h += `<div style="margin-top:12px; text-align:center; font-weight:bold;font-size:0.8rem; color:var(--tmo-magenta);">Please pay by ${ordinal(getDefaultSettings().dueDay)} of this month using Debit Card</div>`;
+  document.getElementById('captureArea').innerHTML = h;
+  document.getElementById('billEmpty').style.display = 'none';
+  document.getElementById('billContent').style.display = 'block';
+}
+
+/* ---------- Calculate & Save (Entry tab) ---------- */
+
+function calculate() {
+  data.bill = parseFloat(document.getElementById('totalBill').value || 0);
+  data.accountCredit = parseFloat(document.getElementById('acctCredit').value) || 0;
+  const cyc = document.getElementById('billingCycle').value;
+
+  save();          // working copy
+  saveCycle(cyc);  // per-cycle save: overrides only this cycle's previous data
+  updateStatus();
+
+  buildBill(cyc);
+  showTab('bill');
+}
+
+/* ---------- Sharing ---------- */
+
+function shareWhatsApp() {
+  const cyc = document.getElementById('billingCycle').value;
+  const { base, acct } = computeSplit();
+  let msg = `*T-Mobile Bill Breakdown*\n*Billing Cycle:* ${cyc}\n*Total Bill:* $${data.bill.toFixed(2)}\n${acct > 0 ? `*Account Credit:* -$${acct.toFixed(2)}\n` : ''}\n`;
+
+  data.families.forEach(f => {
+    const lC = base * f.lines;
+    const tot = lC + f.extras.reduce((s,x)=>s+(parseFloat(x.v)||0),0) - f.credits.reduce((s,c)=>s+(parseFloat(c.v)||0),0);
+    msg += `*${f.name.toUpperCase()}*: $${tot.toFixed(2)}\n● ${f.lines} Lines ($${base.toFixed(2)} × ${f.lines} = $${lC.toFixed(2)})\n${f.extras.filter(x=>x.v>0).map(x=>`+ ${x.n}: $${parseFloat(x.v).toFixed(2)}`).join('\n')}\n${f.credits.filter(c=>c.v>0).map(c=>`-- ${c.n}: $${parseFloat(c.v).toFixed(2)}`).join('\n')}\n\n`;
+  });
+  msg += `👉 Please pay by *${ordinal(getDefaultSettings().dueDay)}* of the month`;
+  window.open(`https://wa.me/?text=${encodeURIComponent(msg.replace(/\n\n\n/g, '\n\n'))}`, '_blank');
+}
+
+function downloadImage() {
+  const area = document.getElementById('captureArea');
+  html2canvas(area, { backgroundColor: "#ffffff", scale: 2, logging: false, useCORS: true }).then(canvas => {
+    const link = document.createElement('a');
+    link.download = `T-Mobile-Split-${new Date().getTime()}.png`;
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  });
+}
+
+/* ---------- Yearly summary ---------- */
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+let viewYear = new Date().getFullYear();
+
+// Saved cycles whose end date falls in the given year, oldest first
+function yearItems(year) {
+  const out = [];
+  Object.entries(getCycles()).forEach(([label, e]) => {
+    const m = label.match(/^(\d{2}) ([A-Za-z]{3}) to (\d{2}) ([A-Za-z]{3}) (\d{4})$/);
+    if (!m || +m[5] !== year || !e || !e.data || !Array.isArray(e.data.families)) return;
+    out.push({ endMon: MONTHS.indexOf(m[4]), endDay: +m[3], short: `${m[1]} ${m[2]} – ${m[3]} ${m[4]}`, d: e.data });
+  });
+  out.sort((a, b) => a.endMon - b.endMon || a.endDay - b.endDay);
+  return out;
+}
+
+function renderYearly() {
+  document.getElementById('yearLabel').innerText = viewYear;
+  const area = document.getElementById('yearArea');
+  const items = yearItems(viewYear);
+  const title = `<div class="ys-title">T-Mobile Bill Summary ${viewYear}</div>`;
+  if (!items.length) {
+    area.innerHTML = title + `<div class="ys-empty">No saved billing cycles for ${viewYear} yet.</div>`;
+    return;
+  }
+
+  // Members are matched by name across cycles, in order of first appearance
+  const keys = [], names = {};
+  const rows = items.map(it => {
+    const { base, acct } = computeSplit(it.d);
+    const t = {};
+    it.d.families.forEach(f => {
+      const nm = String(f.name || '').trim() || 'Member';
+      const key = nm.toLowerCase();
+      if (!(key in names)) { names[key] = nm; keys.push(key); }
+      const amt = base * f.lines
+        + f.extras.reduce((a, x) => a + (parseFloat(x.v) || 0), 0)
+        - f.credits.reduce((a, c) => a + (parseFloat(c.v) || 0), 0);
+      t[key] = (t[key] || 0) + amt;
+    });
+    return { it, t, acct, bill: parseFloat(it.d.bill) || 0 };
+  });
+
+  const hasAcct = rows.some(r => r.acct > 0);
+  const fmt = v => v.toFixed(2);
+  const totals = {}; let totAcct = 0, totBill = 0;
+  rows.forEach(r => {
+    keys.forEach(k => { if (k in r.t) totals[k] = (totals[k] || 0) + r.t[k]; });
+    totAcct += r.acct; totBill += r.bill;
+  });
+
+  let h = title + `<div class="ys-sub">${items.length} Billing Cycle${items.length !== 1 ? 's' : ''} &middot; Amounts in $</div>`;
+  h += `<div class="ys-scroll"><table class="ys-table"><thead><tr><th class="l">Cycle</th><th>Bill</th>`
+    + keys.map(k => `<th>${esc(names[k])}</th>`).join('')
+    + (hasAcct ? '<th>Acct Cr.</th>' : '') + `</tr></thead><tbody>`;
+  rows.forEach(r => {
+    h += `<tr><td class="l">${esc(r.it.short)}</td><td>${fmt(r.bill)}</td>`
+      + keys.map(k => `<td>${k in r.t ? fmt(r.t[k]) : '–'}</td>`).join('')
+      + (hasAcct ? `<td>${r.acct > 0 ? '-' + fmt(r.acct) : '–'}</td>` : '')
+      + `</tr>`;
+  });
+  h += `</tbody><tfoot><tr><td class="l">Total</td><td>${fmt(totBill)}</td>`
+    + keys.map(k => `<td>${fmt(totals[k] || 0)}</td>`).join('')
+    + (hasAcct ? `<td>${totAcct > 0 ? '-' + fmt(totAcct) : '–'}</td>` : '')
+    + `</tr></tfoot></table></div>`;
+  area.innerHTML = h;
+}
+
+function stepYear(d) {
+  const cur = new Date().getFullYear();
+  const years = Object.keys(getCycles()).map(l => parseInt(l.slice(-4), 10)).filter(y => !isNaN(y));
+  const minY = Math.min(cur, ...years);
+  viewYear = Math.max(minY, Math.min(cur, viewYear + d));
+  renderYearly();
+}
+
+// Renders the summary to a canvas at full table width (even if the on-screen table scrolls sideways)
+function captureYear() {
+  return html2canvas(document.getElementById('yearArea'), {
+    backgroundColor: '#ffffff', scale: 2, logging: false, useCORS: true,
+    onclone: doc => {
+      const el = doc.getElementById('yearArea');
+      el.style.width = 'max-content';
+      el.style.minWidth = '360px';
+      const sc = el.querySelector('.ys-scroll');
+      if (sc) sc.style.overflow = 'visible';
+    }
+  });
+}
+
+async function yearReady() {
+  if (yearItems(viewYear).length) return true;
+  await showAlert(`No saved billing cycles for ${viewYear} yet. Press Calculate & Save on the Entry tab first.`);
+  return false;
+}
+
+async function saveYearImage() {
+  if (!(await yearReady())) return;
+  try {
+    const canvas = await captureYear();
+    const link = document.createElement('a');
+    link.download = `T-Mobile-Yearly-Summary-${viewYear}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  } catch (err) {
+    await showAlert('Could not create the image. Check your internet connection and try again.');
+  }
+}
+
+async function saveYearPDF() {
+  if (!(await yearReady())) return;
+  if (!(window.jspdf && window.jspdf.jsPDF)) { printYearFallback(); return; }
+  try {
+    const canvas = await captureYear();
+    const { jsPDF } = window.jspdf;
+    const w = canvas.width, h = canvas.height;
+    const pdf = new jsPDF({ orientation: w > h ? 'landscape' : 'portrait', unit: 'pt', format: 'a4' });
+    const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight(), mg = 24;
+    const k = Math.min((pw - 2 * mg) / w, (ph - 2 * mg) / h);
+    pdf.addImage(canvas.toDataURL('image/png'), 'PNG', mg, mg, w * k, h * k);
+    pdf.save(`T-Mobile-Yearly-Summary-${viewYear}.pdf`);
+  } catch (err) {
+    await showAlert('Could not create the PDF. Check your internet connection and try again.');
+  }
+}
+
+// Used only if the PDF library could not be loaded: print just the yearly summary
+function printYearFallback() {
+  document.body.classList.add('print-year');
+  const done = () => { document.body.classList.remove('print-year'); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  window.print();
+}
+
+/* ---------- Init ---------- */
+
+generateCycleOptions();
+fillSettingsInputs(getDefaultSettings());
+// If the latest cycle was saved before, load it and prepare its bill; otherwise show the working copy
+const initCyc = document.getElementById('billingCycle').value;
+if (loadCycle(initCyc)) buildBill(initCyc); else render();
+updateStatus();
+</script>
+
+</body>
+</html>
