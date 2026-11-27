@@ -129,6 +129,10 @@ input { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px; b
 .set-status { text-align: center; font-size: 0.8rem; color: var(--credit-green); min-height: 1.1em; margin: 0 0 4px; }
 .set-footer { display: flex; justify-content: center; gap: 10px; margin: 14px 0; }
 
+/* Backup & restore */
+.backup-card h3 { margin: 0 0 4px; font-size: 0.95rem; color: var(--tmo-magenta); }
+.backup-note { font-size: 0.72rem; color: #777; margin: 0 0 8px; line-height: 1.4; }
+
 /* Yearly summary */
 .year-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .year-title { font-weight: 800; color: var(--tmo-magenta); font-size: 0.95rem; }
@@ -167,6 +171,7 @@ input { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px; b
   font-size: 0.9rem; color: #333; text-align: left; cursor: pointer;
 }
 .dd-item:last-child { border-bottom: none; }
+.dd-year { position: sticky; top: 0; background: #f6f6f6; color: #777; font-size: 0.7rem; font-weight: bold; padding: 5px 10px; border-bottom: 1px solid #eee; }
 .dd-item.sel { background: #fdf0f7; color: var(--tmo-magenta); font-weight: bold; }
 .dd-tag { font-size: 0.7rem; font-weight: bold; color: var(--credit-green); }
 
@@ -265,6 +270,17 @@ input { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 5px; b
 
     <div class="set-footer">
       <button class="btn-reset" onclick="discardSettings()">Discard changes</button>
+    </div>
+
+    <div class="card backup-card">
+      <h3>Backup &amp; Restore</h3>
+      <p class="backup-note">Your data is stored only in this browser. Download a backup file of everything (defaults and all saved billing cycles) to keep it safe or move it to another device. Restoring a backup replaces all data currently in the app.</p>
+      <div class="share-actions two" style="margin-top:0;">
+        <button class="btn-share" onclick="downloadBackup()">Download Backup</button>
+        <button class="btn-share" onclick="chooseRestoreFile()">Upload Backup</button>
+      </div>
+      <p class="set-status" id="backupStatus" style="margin-top:8px;"></p>
+      <input type="file" id="restoreFile" accept=".json,application/json" style="display:none;" onchange="onRestoreFile(this)">
     </div>
   </div>
 
@@ -508,7 +524,8 @@ function generateCycleOptions() {
     const last = new Date(y, mo + 1, 0).getDate();
     return new Date(y, mo, Math.min(d, last));
   };
-  // List the cycles ending in the past 24 months, including the current month, newest first
+  // List cycles ending from the current month back to January of 5 years ago
+  // (the current year plus the 5 previous full years), newest first
   const off = now.getDate() > endDay ? 0 : -1;
   // If begin date is after end date, the cycle starts in the previous month
   const startShift = startDay > endDay ? 1 : 0;
@@ -516,7 +533,7 @@ function generateCycleOptions() {
   // Default selection: the most recently completed cycle
   const defIdx = curM + off;
   let defLabel = '';
-  for (let eIdx = curM; eIdx > curM - 24; eIdx--) {
+  for (let eIdx = curM; eIdx >= -60; eIdx--) {
     const ed = mk(now.getFullYear(), eIdx, endDay);
     const sd = mk(now.getFullYear(), eIdx - startShift, startDay);
     const lbl = `${pad(sd.getDate())} ${m[sd.getMonth()]} to ${pad(ed.getDate())} ${m[ed.getMonth()]} ${ed.getFullYear()}`;
@@ -538,7 +555,13 @@ function buildCycleMenu() {
   const saved = getCycles();
   const menu = document.getElementById('cycleMenu');
   menu.innerHTML = '';
+  let lastYear = '';
   [...sel.options].forEach(o => {
+    const yr = o.value.slice(-4);
+    if (yr !== lastYear) {
+      lastYear = yr;
+      const h = document.createElement('div'); h.className = 'dd-year'; h.innerText = yr; menu.appendChild(h);
+    }
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'dd-item' + (o.value === sel.value ? ' sel' : '');
@@ -735,6 +758,111 @@ async function saveSettings() {
   updateStatus();
 }
 
+/* ---------- Backup & restore ---------- */
+
+const BACKUP_APP = 'tmobile-bill-splitter';
+const hasFamilies = o => !!o && typeof o === 'object' && Array.isArray(o.families);
+function setBackupStatus(msg) { document.getElementById('backupStatus').innerText = msg; }
+
+function buildBackup() {
+  const read = k => { try { return JSON.parse(localStorage.getItem(k)); } catch (e) { return null; } };
+  return {
+    app: BACKUP_APP,
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    defaults: read(DEFAULTS_KEY),
+    cycles: read(CYCLES_KEY) || {},
+    working: read(VERSION)
+  };
+}
+
+function downloadBackup() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const blob = new Blob([JSON.stringify(buildBackup(), null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `T-Mobile-Bill-Splitter-Backup-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  const n = Object.keys(getCycles()).length;
+  setBackupStatus(`Backup downloaded (${n} saved cycle${n !== 1 ? 's' : ''}).`);
+}
+
+// Validates a backup file's text; throws an Error with a user-friendly message if it is not usable
+function parseBackup(text) {
+  let obj;
+  try { obj = JSON.parse(text); } catch (e) { throw new Error('This file is not a valid backup (it could not be read).'); }
+  if (!obj || obj.app !== BACKUP_APP || !obj.cycles || typeof obj.cycles !== 'object' || Array.isArray(obj.cycles)) {
+    throw new Error('This is not a T-Mobile Bill Splitter backup file.');
+  }
+  const cycles = {};
+  let skipped = 0;
+  Object.entries(obj.cycles).forEach(([label, e]) => {
+    if (e && e.data && Array.isArray(e.data.families)) cycles[label] = { savedAt: e.savedAt || '', data: e.data };
+    else skipped++;
+  });
+  return {
+    defaults: hasFamilies(obj.defaults) ? obj.defaults : null,
+    cycles,
+    working: hasFamilies(obj.working) ? obj.working : null,
+    skipped,
+    exportedAt: obj.exportedAt || ''
+  };
+}
+
+// Replaces all app data with the backup and refreshes every tab
+function applyBackup(b) {
+  if (b.defaults) localStorage.setItem(DEFAULTS_KEY, JSON.stringify(b.defaults)); else localStorage.removeItem(DEFAULTS_KEY);
+  localStorage.setItem(CYCLES_KEY, JSON.stringify(b.cycles));
+  if (b.working) localStorage.setItem(VERSION, JSON.stringify(b.working)); else localStorage.removeItem(VERSION);
+
+  data = b.working ? clone(b.working) : getDefaultData();
+  generateCycleOptions();
+  fillSettingsInputs(getDefaultSettings());
+  updateSetupUI();
+  clearBill();
+  setStatus('');
+  if (hasDefaults()) {
+    const cyc = document.getElementById('billingCycle').value;
+    if (loadCycle(cyc)) buildBill(cyc); else render();
+    updateStatus();
+    showTab('entry');
+  } else {
+    showTab('settings');
+  }
+}
+
+function chooseRestoreFile() { document.getElementById('restoreFile').click(); }
+
+function onRestoreFile(input) {
+  const file = input.files && input.files[0];
+  input.value = '';   // lets the same file be chosen again later
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onerror = () => { showAlert('Could not read that file.'); };
+  reader.onload = async () => {
+    let parsed;
+    try { parsed = parseBackup(String(reader.result)); }
+    catch (err) { await showAlert(err.message); return; }
+
+    const n = Object.keys(parsed.cycles).length;
+    const when = parsed.exportedAt && !isNaN(new Date(parsed.exportedAt)) ? ` from ${new Date(parsed.exportedAt).toLocaleString()}` : '';
+    const ok = await askConfirm(
+      `Restore the backup${when}?\n\nIt has ${n} saved billing cycle${n !== 1 ? 's' : ''}${parsed.defaults ? ' and your default settings' : ''}.\n\nThis replaces all data currently in the app.`,
+      'Restore');
+    if (!ok) return;
+
+    applyBackup(parsed);
+    await showAlert(`Backup restored: ${n} saved billing cycle${n !== 1 ? 's' : ''}.` + (parsed.skipped ? `\n${parsed.skipped} unreadable entr${parsed.skipped !== 1 ? 'ies were' : 'y was'} skipped.` : ''));
+  };
+  reader.readAsText(file);
+}
+
 /* ---------- Bill tab ---------- */
 
 function clearBill() {
@@ -866,7 +994,7 @@ function renderYearly() {
     totAcct += r.acct; totBill += r.bill;
   });
 
-  let h = title + `<div class="ys-sub">${items.length} Billing cycle${items.length !== 1 ? 's' : ''} &middot; Amounts in $</div>`;
+  let h = title + `<div class="ys-sub">${items.length} billing cycle${items.length !== 1 ? 's' : ''} &middot; amounts in $</div>`;
   h += `<div class="ys-scroll"><table class="ys-table"><thead><tr><th class="l">Cycle</th><th>Bill</th>`
     + keys.map(k => `<th>${esc(names[k])}</th>`).join('')
     + (hasAcct ? '<th>Acct Cr.</th>' : '') + `</tr></thead><tbody>`;
